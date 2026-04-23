@@ -13,6 +13,15 @@ const examSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    assignedUsers: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+      ],
+      default: [],
+    },
     sections: {
       type: [mongoose.Schema.Types.Mixed],
       default: [],

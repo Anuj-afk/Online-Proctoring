@@ -44,6 +44,12 @@ function HomeHero() {
                 >
                   My Exams
                 </Link>
+                <Link
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 font-semibold text-[#fff8ea] transition hover:-translate-y-0.5"
+                  to="/available-exams"
+                >
+                  Available Exams
+                </Link>
                 <button
                   type="button"
                   onClick={logout}
@@ -88,8 +94,8 @@ function HomeHero() {
             <p className="mt-6 max-w-2xl text-lg text-white/80">
               Launch a homepage for your proctoring platform with live monitoring, candidate
               verification, automated incident detection, and a clear review workflow for exam
-              admins. Account-based exam storage is now built in, so each user only sees the tests
-              they created.
+              admins. Account-based exam storage and user assignment are now built in, so creators
+              control who can take each test and candidates get a separate exam dashboard.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">

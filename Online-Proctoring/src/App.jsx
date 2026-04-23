@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import AuthPage from './pages/AuthPage';
+import AvailableExamsPage from './pages/AvailableExamsPage';
+import ExamPreviewPage from './pages/ExamPreviewPage';
 import HomePage from './pages/HomePage';
 import CreateExamPage from './pages/CreateExamPage';
 
@@ -17,6 +19,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <CreateExamPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/exam-preview/:examId"
+            element={
+              <ProtectedRoute>
+                <ExamPreviewPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/available-exams"
+            element={
+              <ProtectedRoute>
+                <AvailableExamsPage />
               </ProtectedRoute>
             }
           />

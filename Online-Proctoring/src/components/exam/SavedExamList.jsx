@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import {
   countQuestionTypes,
   flattenQuestionsFromSections,
@@ -72,6 +73,9 @@ function SavedExamList({ exams, isLoading, errorMessage, onRefresh, onEdit, acti
                     {sections.length} sections • {questions.length} questions • {totalTimeLimit}{' '}
                     minutes • saved {formatDate(exam.updatedAt || exam.createdAt)}
                   </p>
+                  <p className={`mt-1 text-sm ${isActive ? 'text-white/65' : 'text-slate-500'}`}>
+                    {exam.assignedCandidates?.length || exam.assignedUsers?.length || 0} assigned users
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -107,6 +111,16 @@ function SavedExamList({ exams, isLoading, errorMessage, onRefresh, onEdit, acti
                   >
                     {isActive ? 'Editing' : 'Edit'}
                   </button>
+                  <Link
+                    to={`/exam-preview/${exam._id}`}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? 'border border-white/20 bg-white/10 text-white hover:bg-white/15'
+                        : 'border border-slate-300 bg-white text-slate-800 hover:border-slate-400'
+                    }`}
+                  >
+                    Preview UI
+                  </Link>
                 </div>
               </div>
 

@@ -4,6 +4,14 @@ export function fetchExams() {
   return request('/api/exams');
 }
 
+export function fetchAvailableExams() {
+  return request('/api/exams/available');
+}
+
+export function fetchExam(examId) {
+  return request(`/api/exams/${examId}`);
+}
+
 export function createExam(exam) {
   return request('/api/exams', {
     method: 'POST',

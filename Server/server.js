@@ -4,6 +4,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import authRoutes from './routes/authRoutes.js';
 import examRoutes from './routes/examRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 
 const server = express();
 const port = process.env.PORT || 3000;
@@ -21,6 +22,7 @@ server.get('/api/health', (_req, res) => {
 
 server.use('/api/auth', authRoutes);
 server.use('/api/exams', examRoutes);
+server.use('/api/users', userRoutes);
 
 server.use((error, _req, res, _next) => {
   console.error(error);

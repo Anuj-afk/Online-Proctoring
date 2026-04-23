@@ -71,6 +71,9 @@ export function normalizeExamForEditor(exam) {
   return {
     _id: exam._id,
     title: exam.title || '',
+    assignedUsers: Array.isArray(exam.assignedUsers)
+      ? exam.assignedUsers.map((user) => (typeof user === 'string' ? user : user?._id)).filter(Boolean)
+      : [],
     sections: getExamSections(exam).map((section, index) => normalizeSection(section, index)),
   };
 }

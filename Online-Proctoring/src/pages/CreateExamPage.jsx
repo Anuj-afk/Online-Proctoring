@@ -7,21 +7,27 @@ import SavedExamList from '../components/exam/SavedExamList';
 import { useAuth } from '../context/AuthContext';
 import { buildQuestion, buildSection, normalizeExamForEditor } from '../lib/examSections';
 import { createExam, fetchExams, updateExam } from '../lib/examsApi';
+import { fetchAssignableUsers } from '../lib/usersApi';
 
 const CreateExamPage = () => {
   const { logout, user } = useAuth();
   const [examTitle, setExamTitle] = useState('');
+  const [assignedUserIds, setAssignedUserIds] = useState([]);
   const [sections, setSections] = useState(() => [buildSection(1)]);
   const [editingExamId, setEditingExamId] = useState(null);
   const [savedExams, setSavedExams] = useState([]);
+  const [availableUsers, setAvailableUsers] = useState([]);
   const [isLoadingExams, setIsLoadingExams] = useState(true);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [savedExamsError, setSavedExamsError] = useState('');
+  const [usersError, setUsersError] = useState('');
 
   const resetBuilder = useCallback(() => {
     setExamTitle('');
+    setAssignedUserIds([]);
     setSections([buildSection(1)]);
     setEditingExamId(null);
     setErrorMessage('');
@@ -42,9 +48,24 @@ const CreateExamPage = () => {
     }
   }, []);
 
+  const loadUsers = useCallback(async () => {
+    setIsLoadingUsers(true);
+    setUsersError('');
+
+    try {
+      const users = await fetchAssignableUsers();
+      setAvailableUsers(users);
+    } catch (error) {
+      setUsersError(error.message);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadExams();
-  }, [loadExams]);
+    loadUsers();
+  }, [loadExams, loadUsers]);
 
   const addSection = () => {
     setSections((currentSections) => [...currentSections, buildSection(currentSections.length + 1)]);
@@ -106,10 +127,19 @@ const CreateExamPage = () => {
     );
   };
 
+  const toggleAssignedUser = (userId) => {
+    setAssignedUserIds((currentIds) =>
+      currentIds.includes(userId)
+        ? currentIds.filter((currentId) => currentId !== userId)
+        : [...currentIds, userId],
+    );
+  };
+
   const editExamHandler = (exam) => {
     const normalizedExam = normalizeExamForEditor(exam);
     setEditingExamId(normalizedExam._id);
     setExamTitle(normalizedExam.title);
+    setAssignedUserIds(normalizedExam.assignedUsers || []);
     setSections(normalizedExam.sections);
     setErrorMessage('');
     setSuccessMessage(`Editing "${normalizedExam.title}".`);
@@ -157,6 +187,7 @@ const CreateExamPage = () => {
 
     const payload = {
       title: examTitle.trim(),
+      assignedUsers: assignedUserIds,
       sections: sections.map((section) => ({
         ...section,
         title: section.title.trim(),
@@ -175,6 +206,7 @@ const CreateExamPage = () => {
 
       setEditingExamId(normalizedExam._id);
       setExamTitle(normalizedExam.title);
+      setAssignedUserIds(normalizedExam.assignedUsers || []);
       setSections(normalizedExam.sections);
       setSuccessMessage(
         editingExamId ? 'Exam updated successfully.' : 'Exam saved successfully.',
@@ -193,7 +225,7 @@ const CreateExamPage = () => {
         <div className="mb-6 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Signed In Workspace
+              Creator Workspace
             </p>
             <p className="mt-1 text-sm text-slate-600">
               {user?.name} ({user?.email})
@@ -201,6 +233,12 @@ const CreateExamPage = () => {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <Link
+              to="/available-exams"
+              className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            >
+              Candidate Dashboard
+            </Link>
             <Link
               to="/"
               className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
@@ -222,10 +260,10 @@ const CreateExamPage = () => {
             Exam Builder
           </p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight text-slate-900">
-            {editingExamId ? 'Edit your exam' : 'Create and store exams'}
+            {editingExamId ? 'Edit your exam' : 'Create and assign exams'}
           </h1>
           <p className="mt-3 max-w-2xl text-slate-600">
-            Build exams section by section, assign a time limit to each section, and reopen saved
+            Build section-based exams, choose exactly which users can take them, and reopen saved
             exams for editing whenever needed.
           </p>
         </div>
@@ -259,6 +297,64 @@ const CreateExamPage = () => {
                 >
                   {editingExamId ? 'Create New Exam' : 'Reset Builder'}
                 </button>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-[2rem] border border-slate-200 bg-slate-50/80 p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Allowed Candidates
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Select which users can see this exam in their dashboard.
+                  </p>
+                </div>
+                <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+                  {assignedUserIds.length} selected
+                </span>
+              </div>
+
+              {isLoadingUsers ? <p className="text-sm text-slate-500">Loading users...</p> : null}
+
+              {!isLoadingUsers && usersError ? (
+                <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {usersError}
+                </p>
+              ) : null}
+
+              {!isLoadingUsers && !usersError && availableUsers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-5 text-sm text-slate-500">
+                  No other registered users are available yet.
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {availableUsers.map((candidate) => {
+                  const isSelected = assignedUserIds.includes(candidate._id);
+
+                  return (
+                    <label
+                      key={candidate._id}
+                      className={`flex cursor-pointer items-start gap-4 rounded-[1.5rem] border px-4 py-4 transition ${
+                        isSelected
+                          ? 'border-emerald-300 bg-emerald-50'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleAssignedUser(candidate._id)}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">{candidate.name}</p>
+                        <p className="text-sm text-slate-500">{candidate.email}</p>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
