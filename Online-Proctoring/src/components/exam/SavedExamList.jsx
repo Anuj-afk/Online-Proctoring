@@ -21,7 +21,9 @@ function SavedExamList({ exams, isLoading, errorMessage, onRefresh }) {
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Saved Exams</h2>
-          <p className="text-sm text-slate-500">These are loaded directly from MongoDB.</p>
+          <p className="text-sm text-slate-500">
+            These are loaded from MongoDB for your signed-in account only.
+          </p>
         </div>
         <button
           type="button"

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import requireAuth from '../middleware/requireAuth.js';
 import Exam from '../models/Exam.js';
 
 const router = Router();
@@ -9,9 +10,11 @@ const createError = (message, statusCode) => {
   return error;
 };
 
-router.get('/', async (_req, res, next) => {
+router.use(requireAuth);
+
+router.get('/', async (req, res, next) => {
   try {
-    const exams = await Exam.find().sort({ createdAt: -1 }).lean();
+    const exams = await Exam.find({ owner: req.user.id }).sort({ createdAt: -1 }).lean();
     res.json(exams);
   } catch (error) {
     next(error);
@@ -31,6 +34,7 @@ router.post('/', async (req, res, next) => {
     }
 
     const exam = await Exam.create({
+      owner: req.user.id,
       title: title.trim(),
       questions,
     });

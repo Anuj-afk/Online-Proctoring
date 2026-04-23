@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
 import mongoose from 'mongoose';
+import authRoutes from './routes/authRoutes.js';
 import examRoutes from './routes/examRoutes.js';
 
 const server = express();
@@ -18,6 +19,7 @@ server.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+server.use('/api/auth', authRoutes);
 server.use('/api/exams', examRoutes);
 
 server.use((error, _req, res, _next) => {

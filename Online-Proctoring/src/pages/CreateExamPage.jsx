@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import CodingQuestion from '../components/exam/CodingQuestion';
 import MCQQuestion from '../components/exam/MCQQuestion';
 import PassageQuestion from '../components/exam/PassageQuestion';
 import SavedExamList from '../components/exam/SavedExamList';
+import { useAuth } from '../context/AuthContext';
 import { createExam, fetchExams } from '../lib/examsApi';
 
 function buildQuestion(type) {
@@ -34,6 +36,7 @@ function buildQuestion(type) {
 }
 
 const CreateExamPage = () => {
+  const { logout, user } = useAuth();
   const [examTitle, setExamTitle] = useState('');
   const [questions, setQuestions] = useState([]);
   const [savedExams, setSavedExams] = useState([]);
@@ -111,6 +114,33 @@ const CreateExamPage = () => {
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-10 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
+        <div className="mb-6 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Signed In Workspace
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              {user?.name} ({user?.email})
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/"
+              className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            >
+              Home
+            </Link>
+            <button
+              type="button"
+              onClick={logout}
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
         <div className="mb-8">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
             Exam Builder
@@ -119,8 +149,8 @@ const CreateExamPage = () => {
             Create and store exams
           </h1>
           <p className="mt-3 max-w-2xl text-slate-600">
-            Save exams to MongoDB from the form below, then review every saved exam in the panel
-            on the right.
+            Save exams to MongoDB from the form below. The list on the right only shows tests
+            created by your account.
           </p>
         </div>
 

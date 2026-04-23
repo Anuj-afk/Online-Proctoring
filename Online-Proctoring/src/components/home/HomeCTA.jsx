@@ -1,6 +1,9 @@
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 function HomeCTA() {
+  const { isAuthenticated } = useAuth();
+
   return (
     <section className="mx-auto max-w-7xl px-5 pb-18 sm:px-6 lg:px-8">
       <div className="flex flex-col items-start justify-between gap-5 rounded-[2rem] border border-slate-900/10 bg-[linear-gradient(135deg,rgba(235,223,200,0.9),rgba(255,255,255,0.68))] p-8 shadow-[0_20px_44px_rgba(26,42,61,0.08)] md:flex-row md:items-center">
@@ -15,9 +18,9 @@ function HomeCTA() {
 
         <Link
           className="inline-flex min-h-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 px-6 font-bold text-slate-900 shadow-[0_18px_36px_rgba(206,148,57,0.26)] transition hover:-translate-y-0.5"
-          to="/create-exam"
+          to={isAuthenticated ? '/create-exam' : '/auth'}
         >
-          Create Exam
+          {isAuthenticated ? 'Open Your Exams' : 'Login To Create'}
         </Link>
       </div>
     </section>

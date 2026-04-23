@@ -1,6 +1,10 @@
+import { Link } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 import { platformStats, timelineEvents } from '../../data/homePageData'
 
 function HomeHero() {
+  const { isAuthenticated, logout, user } = useAuth()
+
   return (
     <section className="mx-auto max-w-7xl px-5 pb-18 pt-6 sm:px-6 lg:px-8">
       <div className="relative">
@@ -18,17 +22,54 @@ function HomeHero() {
             </div>
           </div>
 
-          <nav className="flex flex-wrap gap-6 text-sm text-white/80" aria-label="Primary">
-            <a className="transition hover:text-white" href="#features">
-              Features
-            </a>
-            <a className="transition hover:text-white" href="#workflow">
-              Workflow
-            </a>
-            <a className="transition hover:text-white" href="#dashboard">
-              Dashboard
-            </a>
-          </nav>
+          <div className="flex flex-wrap items-center gap-4">
+            <nav className="flex flex-wrap gap-6 text-sm text-white/80" aria-label="Primary">
+              <a className="transition hover:text-white" href="#features">
+                Features
+              </a>
+              <a className="transition hover:text-white" href="#workflow">
+                Workflow
+              </a>
+              <a className="transition hover:text-white" href="#dashboard">
+                Dashboard
+              </a>
+            </nav>
+
+            {isAuthenticated ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-white/70">{user?.name}</span>
+                <Link
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 px-5 font-bold text-slate-900 transition hover:-translate-y-0.5"
+                  to="/create-exam"
+                >
+                  My Exams
+                </Link>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 font-semibold text-[#fff8ea] transition hover:-translate-y-0.5"
+                >
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 font-semibold text-[#fff8ea] transition hover:-translate-y-0.5"
+                  to="/auth"
+                >
+                  Login
+                </Link>
+                <Link
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 px-5 font-bold text-slate-900 transition hover:-translate-y-0.5"
+                  to="/auth"
+                  state={{ mode: 'signup' }}
+                >
+                  Signup
+                </Link>
+              </div>
+            )}
+          </div>
         </header>
 
         <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
@@ -47,7 +88,8 @@ function HomeHero() {
             <p className="mt-6 max-w-2xl text-lg text-white/80">
               Launch a homepage for your proctoring platform with live monitoring, candidate
               verification, automated incident detection, and a clear review workflow for exam
-              admins.
+              admins. Account-based exam storage is now built in, so each user only sees the tests
+              they created.
             </p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
