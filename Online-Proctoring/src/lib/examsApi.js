@@ -12,6 +12,13 @@ export function fetchExam(examId) {
   return request(`/api/exams/${examId}`);
 }
 
+export function submitExam(examId, submission) {
+  return request(`/api/exams/${examId}/submissions`, {
+    method: 'POST',
+    body: JSON.stringify(submission),
+  });
+}
+
 export function createExam(exam) {
   return request('/api/exams', {
     method: 'POST',

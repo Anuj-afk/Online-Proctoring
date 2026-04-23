@@ -13,6 +13,7 @@ const CreateExamPage = () => {
   const { logout, user } = useAuth();
   const [examTitle, setExamTitle] = useState('');
   const [assignedUserIds, setAssignedUserIds] = useState([]);
+  const [allowedFaults, setAllowedFaults] = useState(3);
   const [sections, setSections] = useState(() => [buildSection(1)]);
   const [editingExamId, setEditingExamId] = useState(null);
   const [savedExams, setSavedExams] = useState([]);
@@ -28,6 +29,7 @@ const CreateExamPage = () => {
   const resetBuilder = useCallback(() => {
     setExamTitle('');
     setAssignedUserIds([]);
+    setAllowedFaults(3);
     setSections([buildSection(1)]);
     setEditingExamId(null);
     setErrorMessage('');
@@ -140,6 +142,7 @@ const CreateExamPage = () => {
     setEditingExamId(normalizedExam._id);
     setExamTitle(normalizedExam.title);
     setAssignedUserIds(normalizedExam.assignedUsers || []);
+    setAllowedFaults(Number.isInteger(normalizedExam.allowedFaults) ? normalizedExam.allowedFaults : 3);
     setSections(normalizedExam.sections);
     setErrorMessage('');
     setSuccessMessage(`Editing "${normalizedExam.title}".`);
@@ -147,6 +150,10 @@ const CreateExamPage = () => {
   };
 
   const validateExam = () => {
+    if (!Number.isInteger(Number.parseInt(allowedFaults, 10)) || Number.parseInt(allowedFaults, 10) < 0) {
+      return 'Allowed faults must be a non-negative integer.';
+    }
+
     if (!examTitle.trim()) {
       return 'Please enter an exam title.';
     }
@@ -185,17 +192,16 @@ const CreateExamPage = () => {
       return;
     }
 
+    setIsSaving(true);
+
     const payload = {
       title: examTitle.trim(),
       assignedUsers: assignedUserIds,
-      sections: sections.map((section) => ({
-        ...section,
-        title: section.title.trim(),
-        timeLimitMinutes: Number.parseInt(section.timeLimitMinutes, 10),
-      })),
+      allowedFaults: Number.isInteger(Number.parseInt(allowedFaults, 10))
+        ? Number.parseInt(allowedFaults, 10)
+        : 3,
+      sections,
     };
-
-    setIsSaving(true);
 
     try {
       const savedExam = editingExamId
@@ -207,10 +213,9 @@ const CreateExamPage = () => {
       setEditingExamId(normalizedExam._id);
       setExamTitle(normalizedExam.title);
       setAssignedUserIds(normalizedExam.assignedUsers || []);
+      setAllowedFaults(normalizedExam.allowedFaults);
       setSections(normalizedExam.sections);
-      setSuccessMessage(
-        editingExamId ? 'Exam updated successfully.' : 'Exam saved successfully.',
-      );
+      setSuccessMessage(editingExamId ? 'Exam updated successfully.' : 'Exam saved successfully.');
       await loadExams();
     } catch (error) {
       setErrorMessage(error.message);
@@ -280,6 +285,21 @@ const CreateExamPage = () => {
                   className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
                   placeholder="Enter exam title"
                 />
+              </div>
+
+              <div className="w-full max-w-[240px]">
+                <label className="mb-2 block text-sm font-medium text-slate-700">Allowed Faults</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={allowedFaults}
+                  onChange={(event) => setAllowedFaults(Number(event.target.value))}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
+                  placeholder="3"
+                />
+                <p className="mt-2 text-xs text-slate-500">
+                  Auto-submit after this many faults.
+                </p>
               </div>
 
               <div className="flex flex-wrap gap-3">

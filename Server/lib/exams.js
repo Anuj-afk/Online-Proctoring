@@ -75,10 +75,37 @@ function serializePopulatedUsers(users = []) {
     .map((user) => serializeUser(user));
 }
 
+export function serializeSubmission(submission) {
+  if (!submission || typeof submission !== 'object') {
+    return null;
+  }
+
+  const candidate = submission.candidate && typeof submission.candidate === 'object' && submission.candidate.email
+    ? serializeUser(submission.candidate)
+    : null;
+
+  return {
+    candidate,
+    answers: submission.answers || {},
+    submittedAt: submission.submittedAt ? new Date(submission.submittedAt).toISOString() : null,
+  };
+}
+
+export function serializeSubmissions(submissions = []) {
+  if (!Array.isArray(submissions)) {
+    return [];
+  }
+
+  return submissions
+    .map(serializeSubmission)
+    .filter(Boolean);
+}
+
 export function validateExamPayload(payload = {}) {
   const title = payload.title?.trim();
   const sections = normalizeSections(payload.sections, payload.questions);
   const assignedUsers = normalizeAssignedUsers(payload.assignedUsers);
+  const allowedFaults = Number.parseInt(payload.allowedFaults, 10);
 
   if (!title) {
     const error = new Error('Exam title is required.');
@@ -112,21 +139,26 @@ export function validateExamPayload(payload = {}) {
     }
   });
 
+  const normalizedAllowedFaults = Number.isInteger(allowedFaults) && allowedFaults >= 0 ? allowedFaults : 3;
+
   return {
     title,
     assignedUsers,
     sections,
     questions: flattenQuestions(sections),
+    allowedFaults: normalizedAllowedFaults,
   };
 }
 
-export function serializeExam(exam) {
+export function serializeExam(exam, options = {}) {
   const plainExam = typeof exam.toObject === 'function' ? exam.toObject() : { ...exam };
   const sections = normalizeSections(plainExam.sections, plainExam.questions);
   const ownerId = normalizeUserId(plainExam.owner);
   const assignedUsers = normalizeAssignedUsers(plainExam.assignedUsers);
+  const includeSubmissions = options.includeSubmissions === true;
+  const currentUserId = options.currentUserId || null;
 
-  return {
+  const result = {
     ...plainExam,
     ownerId,
     owner:
@@ -138,4 +170,22 @@ export function serializeExam(exam) {
     sections,
     questions: flattenQuestions(sections),
   };
+
+  if (includeSubmissions) {
+    result.submissions = serializeSubmissions(plainExam.submissions);
+  }
+
+  if (currentUserId) {
+    const ownSubmission = Array.isArray(plainExam.submissions)
+      ? plainExam.submissions.find(
+          (submission) => normalizeUserId(submission.candidate) === normalizeUserId(currentUserId),
+        )
+      : null;
+
+    if (ownSubmission) {
+      result.mySubmission = serializeSubmission(ownSubmission);
+    }
+  }
+
+  return result;
 }

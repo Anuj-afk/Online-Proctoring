@@ -75,7 +75,7 @@ function AvailableExamsPage() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
             Available Exams
           </p>
-          <h1 className="mt-2 text-4xl font-bold tracking-tight text-slate-900">
+          <h1 className="mt-2 text-4xl font-bold tracking-tight text-white">
             Exams assigned to you
           </h1>
           <p className="mt-3 max-w-2xl text-slate-600">
@@ -123,7 +123,7 @@ function AvailableExamsPage() {
                   </div>
 
                   <Link
-                    to={`/exam-preview/${exam._id}`}
+                    to={`/exam/${exam._id}`}
                     className="inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
                   >
                     Open Exam

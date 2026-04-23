@@ -112,14 +112,14 @@ function SavedExamList({ exams, isLoading, errorMessage, onRefresh, onEdit, acti
                     {isActive ? 'Editing' : 'Edit'}
                   </button>
                   <Link
-                    to={`/exam-preview/${exam._id}`}
+                    to={`/exam/${exam._id}`}
                     className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                       isActive
                         ? 'border border-white/20 bg-white/10 text-white hover:bg-white/15'
                         : 'border border-slate-300 bg-white text-slate-800 hover:border-slate-400'
                     }`}
                   >
-                    Preview UI
+                    Open exam
                   </Link>
                 </div>
               </div>

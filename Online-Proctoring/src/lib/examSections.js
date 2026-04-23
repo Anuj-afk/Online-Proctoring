@@ -74,6 +74,9 @@ export function normalizeExamForEditor(exam) {
     assignedUsers: Array.isArray(exam.assignedUsers)
       ? exam.assignedUsers.map((user) => (typeof user === 'string' ? user : user?._id)).filter(Boolean)
       : [],
+    allowedFaults: Number.isInteger(Number.parseInt(exam.allowedFaults, 10))
+      ? Number.parseInt(exam.allowedFaults, 10)
+      : 3,
     sections: getExamSections(exam).map((section, index) => normalizeSection(section, index)),
   };
 }
