@@ -32,3 +32,10 @@ export function updateExam(examId, exam) {
     body: JSON.stringify(exam),
   });
 }
+
+export function runCode(code, language, input = '') {
+  return request('/api/code/run', {
+    method: 'POST',
+    body: JSON.stringify({ code, language, input }),
+  });
+}

@@ -1,7 +1,67 @@
 import { serializeUser } from './auth.js';
 
+const SUPPORTED_CODING_LANGUAGES = ['javascript', 'python'];
+
 function createSectionId(index) {
   return `section-${index + 1}`;
+}
+
+function normalizeCodingLanguages(supportedLanguages) {
+  const normalizedLanguages = (Array.isArray(supportedLanguages) ? supportedLanguages : [])
+    .map((language) => (typeof language === 'string' ? language.toLowerCase() : ''))
+    .filter((language) => SUPPORTED_CODING_LANGUAGES.includes(language));
+
+  return normalizedLanguages.length > 0
+    ? [...new Set(normalizedLanguages)]
+    : [...SUPPORTED_CODING_LANGUAGES];
+}
+
+function normalizeCodingQuestion(question = {}) {
+  const supportedLanguages = normalizeCodingLanguages(question.supportedLanguages);
+  const starterCodeSource =
+    question.starterCodeByLanguage && typeof question.starterCodeByLanguage === 'object'
+      ? question.starterCodeByLanguage
+      : {};
+  const legacyJavaScriptStarterCode = typeof question.code === 'string' ? question.code : '';
+
+  const starterCodeByLanguage = supportedLanguages.reduce((accumulator, language) => {
+    const starterCode = starterCodeSource[language];
+
+    accumulator[language] =
+      typeof starterCode === 'string'
+        ? starterCode
+        : language === 'javascript'
+          ? legacyJavaScriptStarterCode
+          : '';
+
+    return accumulator;
+  }, {});
+
+  const testCases =
+    Array.isArray(question.testCases) && question.testCases.length > 0
+      ? question.testCases.map((testCase) => ({
+          input: typeof testCase?.input === 'string' ? testCase.input : '',
+          expected: typeof testCase?.expected === 'string' ? testCase.expected : '',
+        }))
+      : [{ input: '', expected: '' }];
+
+  return {
+    ...question,
+    type: 'coding',
+    problem: typeof question.problem === 'string' ? question.problem.trim() : '',
+    supportedLanguages,
+    starterCodeByLanguage,
+    code: starterCodeByLanguage.javascript ?? legacyJavaScriptStarterCode,
+    testCases,
+  };
+}
+
+function normalizeQuestion(question = {}) {
+  if (question.type === 'coding') {
+    return normalizeCodingQuestion(question);
+  }
+
+  return question;
 }
 
 function normalizeSection(section = {}, index = 0) {
@@ -15,7 +75,7 @@ function normalizeSection(section = {}, index = 0) {
     title: typeof section.title === 'string' ? section.title.trim() : '',
     timeLimitMinutes: Number.isFinite(parsedTimeLimit) ? parsedTimeLimit : 0,
     questionType,
-    questions,
+    questions: questions.map(normalizeQuestion),
   };
 }
 
@@ -30,7 +90,7 @@ export function normalizeSections(sections, fallbackQuestions = []) {
         id: createSectionId(0),
         title: 'Section 1',
         timeLimitMinutes: 30,
-        questions: fallbackQuestions,
+        questions: fallbackQuestions.map(normalizeQuestion),
       },
     ];
   }

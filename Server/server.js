@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express from 'express';
 import mongoose from 'mongoose';
 import authRoutes from './routes/authRoutes.js';
+import codeRoutes from './routes/codeRoutes.js';
 import examRoutes from './routes/examRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 
@@ -21,6 +22,7 @@ server.get('/api/health', (_req, res) => {
 });
 
 server.use('/api/auth', authRoutes);
+server.use('/api/code', codeRoutes);
 server.use('/api/exams', examRoutes);
 server.use('/api/users', userRoutes);
 

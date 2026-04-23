@@ -1,9 +1,121 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getExamSections, getTotalTimeLimit, summarizeQuestion } from '../lib/examSections';
-import { fetchExam, submitExam } from '../lib/examsApi';
+import {
+  DEFAULT_CODING_LANGUAGE,
+  getCodingLanguageLabel,
+  getCodingStarterCode,
+  getExamSections,
+  getTotalTimeLimit,
+  normalizeCodingQuestion,
+  summarizeQuestion,
+} from '../lib/examSections';
+import { fetchExam, runCode, submitExam } from '../lib/examsApi';
 import * as faceapi from 'face-api.js';
+
+function getNormalizedCodingAnswer(question, answerState = {}) {
+  const normalizedQuestion = normalizeCodingQuestion(question);
+  const supportedLanguages = normalizedQuestion.supportedLanguages;
+  const language = supportedLanguages.includes(answerState?.language)
+    ? answerState.language
+    : supportedLanguages[0] || DEFAULT_CODING_LANGUAGE;
+
+  const codeByLanguage = supportedLanguages.reduce((accumulator, supportedLanguage) => {
+    const savedCode = answerState?.codeByLanguage?.[supportedLanguage];
+    const legacyCode = supportedLanguage === language ? answerState?.code : undefined;
+
+    accumulator[supportedLanguage] =
+      typeof savedCode === 'string'
+        ? savedCode
+        : typeof legacyCode === 'string'
+          ? legacyCode
+          : getCodingStarterCode(normalizedQuestion, supportedLanguage);
+
+    return accumulator;
+  }, {});
+
+  return {
+    language,
+    codeByLanguage,
+    code: codeByLanguage[language] ?? '',
+    input:
+      typeof answerState?.input === 'string'
+        ? answerState.input
+        : normalizedQuestion.testCases?.[0]?.input || '',
+    output: typeof answerState?.output === 'string' ? answerState.output : '',
+    status: typeof answerState?.status === 'string' ? answerState.status : 'idle',
+    stdout: typeof answerState?.stdout === 'string' ? answerState.stdout : '',
+    stderr: typeof answerState?.stderr === 'string' ? answerState.stderr : '',
+    timedOut: answerState?.timedOut === true,
+    durationMs: Number.isFinite(answerState?.durationMs) ? answerState.durationMs : null,
+    exitCode: Number.isInteger(answerState?.exitCode) ? answerState.exitCode : null,
+    signal: typeof answerState?.signal === 'string' ? answerState.signal : null,
+    outputLimitExceeded: answerState?.outputLimitExceeded === true,
+  };
+}
+
+function hasCodingAttempt(question, answerState) {
+  if (!answerState) {
+    return false;
+  }
+
+  const normalizedQuestion = normalizeCodingQuestion(question);
+  const normalizedAnswer = getNormalizedCodingAnswer(normalizedQuestion, answerState);
+
+  return normalizedQuestion.supportedLanguages.some((language) => {
+    const code = normalizedAnswer.codeByLanguage[language] ?? '';
+    const starterCode = getCodingStarterCode(normalizedQuestion, language);
+    return code.trim() && code !== starterCode;
+  });
+}
+
+function getRunStatusLabel(status) {
+  switch (status) {
+    case 'running':
+      return 'Running';
+    case 'success':
+      return 'Success';
+    case 'timeout':
+      return 'Timed Out';
+    case 'error':
+      return 'Error';
+    default:
+      return 'Ready';
+  }
+}
+
+function formatRunOutput(result) {
+  const lines = [
+    `Status: ${getRunStatusLabel(result.status)}`,
+    `Language: ${getCodingLanguageLabel(result.language)}`,
+  ];
+
+  if (Number.isFinite(result.durationMs)) {
+    lines.push(`Duration: ${result.durationMs}ms`);
+  }
+
+  if (Number.isInteger(result.exitCode)) {
+    lines.push(`Exit code: ${result.exitCode}`);
+  }
+
+  if (result.signal) {
+    lines.push(`Signal: ${result.signal}`);
+  }
+
+  if (result.stdout) {
+    lines.push('', '[stdout]', result.stdout);
+  }
+
+  if (result.stderr) {
+    lines.push('', '[stderr]', result.stderr);
+  }
+
+  if (!result.stdout && !result.stderr) {
+    lines.push('', result.output || 'Program finished without output.');
+  }
+
+  return lines.join('\n');
+}
 
 function getQuestionStatus(question, answerState) {
   if (question.type === 'passage') {
@@ -13,13 +125,7 @@ function getQuestionStatus(question, answerState) {
   }
 
   if (question.type === 'coding') {
-    if (!answerState) {
-      return 'unanswered';
-    }
-
-    return answerState.code?.trim() && answerState.code !== (question.code || '')
-      ? 'attempted'
-      : 'unanswered';
+    return hasCodingAttempt(question, answerState) ? 'attempted' : 'unanswered';
   }
 
   return answerState ? 'attempted' : 'unanswered';
@@ -45,34 +151,6 @@ function formatDate(value) {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
-}
-
-function buildCodingRunOutput(question, answer) {
-  const testCases = Array.isArray(question.testCases) ? question.testCases : [];
-
-  if (!answer?.code?.trim()) {
-    return 'No code to run.\nAdd code in the editor to simulate execution.';
-  }
-
-  const lines = [
-    'Running against sample test cases...',
-    '',
-    `Language: JavaScript`,
-    `Characters in editor: ${answer.code.length}`,
-    '',
-  ];
-
-  testCases.forEach((testCase, index) => {
-    lines.push(`Case ${index + 1}`);
-    lines.push(`Input: ${testCase.input || '(empty)'}`);
-    lines.push(`Expected: ${testCase.expected || '(not provided)'}`);
-    lines.push('Result: Preview mode does not execute code, but the runner layout is wired.');
-    lines.push('');
-  });
-
-  lines.push('Execution finished.');
-
-  return lines.join('\n');
 }
 
 async function checkCameraAndMicrophone() {
@@ -329,13 +407,61 @@ function MCQLayout({
   );
 }
 
+function QuestionNavigator({ questions, activeQuestionIndex, answers, onJumpToQuestion }) {
+  return (
+    <aside className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.08)] 2xl:sticky 2xl:top-6 2xl:self-start">
+      <div className="mb-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+          Question Navigator
+        </p>
+        <h3 className="mt-2 text-xl font-semibold text-slate-900">Jump to any question</h3>
+      </div>
+
+      <div className="grid gap-3">
+        {questions.map((navigatorQuestion, index) => {
+          const isCurrent = index === activeQuestionIndex;
+          const status = getQuestionStatus(navigatorQuestion, answers[navigatorQuestion.id]);
+
+          return (
+            <button
+              key={navigatorQuestion.id ?? index}
+              type="button"
+              onClick={() => onJumpToQuestion(index)}
+              className={`rounded-[1.25rem] border px-4 py-4 text-left transition ${
+                isCurrent
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : status === 'attempted'
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                    : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-white'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">
+                  {formatQuestionLabel(index)}
+                </p>
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] opacity-70">
+                  {isCurrent ? 'Current' : status === 'attempted' ? 'Attempted' : 'Pending'}
+                </span>
+              </div>
+              <p className="mt-3 line-clamp-3 text-sm font-medium leading-6">
+                {summarizeQuestion(navigatorQuestion)}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
 function PassageLayout({
   question,
+  questions,
+  activeQuestionIndex,
+  onJumpToQuestion,
   answers,
   activeSubQuestionIndex,
   setActiveSubQuestionIndex,
-  isSidebarOpen,
-  setIsSidebarOpen,
   onSelectPassageOption,
   isSubmitted,
 }) {
@@ -345,196 +471,313 @@ function PassageLayout({
   const selectedAnswer = answerKey ? answers[answerKey] : '';
 
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
-      <button
-        type="button"
-        onClick={() => setIsSidebarOpen((current) => !current)}
-        onMouseEnter={() => setIsSidebarOpen(true)}
-        className="absolute left-4 top-4 z-20 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg"
-      >
-        Passage
-      </button>
-
-      <div className="grid min-h-[680px] lg:grid-cols-[320px_1fr]">
-        <aside
-          onMouseLeave={() => setIsSidebarOpen(false)}
-          className={`border-r border-slate-200 bg-[linear-gradient(180deg,#0f172a,#132238)] px-5 pb-5 pt-18 text-[#fff8ea] transition-all duration-300 ${
-            isSidebarOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none -translate-x-full opacity-0 lg:pointer-events-auto lg:translate-x-0 lg:opacity-100'
-          }`}
-        >
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-200/75">
-            Reading Passage
-          </p>
-          <div className="mt-4 max-h-[540px] overflow-y-auto pr-2 text-sm leading-7 text-white/82">
-            {question.passage || 'No passage text provided for this question.'}
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+        <div className="border-b border-slate-200 bg-[linear-gradient(135deg,#fff8eb,#f8fafc)] px-6 py-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">
+                Passage Question
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
+                {formatQuestionLabel(activeQuestionIndex)}. {activeSubQuestion?.question || 'Choose a sub-question to answer'}
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                Read the passage, then answer the related prompts below. This set contains {subQuestions.length} linked questions.
+              </p>
+            </div>
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800">
+              {subQuestions.length} prompts
+            </span>
           </div>
-        </aside>
+        </div>
 
-        <section className="flex min-w-0 flex-col p-6 pt-18 lg:pt-6">
-          <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-              Passage Question
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-              {activeSubQuestion?.question || 'Choose a sub-question to answer'}
-            </h2>
-          </div>
+        <div className="grid gap-6 p-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+          <article className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(180deg,#0f172a,#16253c)] p-5 text-white shadow-[0_24px_50px_rgba(15,23,42,0.18)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-200/75">
+                  Reading Passage
+                </p>
+                <p className="mt-1 text-sm text-white/70">Keep this visible while answering the linked prompts.</p>
+              </div>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-white/80">
+                Reference
+              </span>
+            </div>
+            <div className="mt-5 max-h-[560px] overflow-y-auto pr-2 whitespace-pre-wrap text-sm leading-7 text-white/88">
+              {question.passage || 'No passage text provided for this question.'}
+            </div>
+          </article>
 
-          <div className="mt-5 flex flex-wrap gap-3">
-            {subQuestions.map((subQuestion, index) => {
-              const subAnswer = answers[`${question.id}:${subQuestion.id}`];
-              const isCurrent = index === activeSubQuestionIndex;
+          <section className="min-w-0">
+            <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Active Prompt
+                  </p>
+                  <h3 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                    {activeSubQuestion?.question || 'Choose a sub-question to answer'}
+                  </h3>
+                </div>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+                  {activeSubQuestionIndex + 1} of {Math.max(subQuestions.length, 1)}
+                </span>
+              </div>
+            </div>
 
-              return (
-                <button
-                  key={subQuestion.id ?? index}
-                  type="button"
-                  onClick={() => setActiveSubQuestionIndex(index)}
-                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                    isCurrent
-                      ? 'border-slate-900 bg-slate-900 text-white'
-                      : subAnswer
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                        : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                >
-                  {formatQuestionLabel(index)} {subAnswer ? 'Answered' : 'Open'}
-                </button>
-              );
-            })}
-          </div>
+            <div className="mt-5 flex flex-wrap gap-3">
+              {subQuestions.map((subQuestion, index) => {
+                const subAnswer = answers[`${question.id}:${subQuestion.id}`];
+                const isCurrent = index === activeSubQuestionIndex;
 
-          <div className="mt-6 grid flex-1 gap-4 content-start">
-            {activeSubQuestion?.options?.map((option, optionIndex) => {
-              const isSelected = selectedAnswer === option;
+                return (
+                  <button
+                    key={subQuestion.id ?? index}
+                    type="button"
+                    onClick={() => setActiveSubQuestionIndex(index)}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                      isCurrent
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : subAnswer
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    {formatQuestionLabel(index)} {subAnswer ? 'Answered' : 'Open'}
+                  </button>
+                );
+              })}
+            </div>
 
-              return (
-                <button
-                  key={`${activeSubQuestion.id}-${optionIndex}`}
-                  type="button"
-                  onClick={() => !isSubmitted && onSelectPassageOption(activeSubQuestion.id, option)}
-                  disabled={isSubmitted}
-                  className={`rounded-[1.5rem] border px-5 py-5 text-left transition ${
-                    isSelected
-                      ? 'border-amber-400 bg-amber-50 shadow-[0_18px_36px_rgba(245,158,11,0.12)]'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
-                  } ${isSubmitted ? 'cursor-not-allowed opacity-70' : ''}`}
-                >
-                  <div className="flex items-start gap-4">
-                    <span
-                      className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-semibold ${
-                        isSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-100 text-slate-500'
-                      }`}
-                    >
-                      {String.fromCharCode(65 + optionIndex)}
-                    </span>
-                    <span className="pt-1 text-base text-slate-800">{option || `Option ${optionIndex + 1}`}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      </div>
+            <div className="mt-6 grid gap-4">
+              {activeSubQuestion?.options?.map((option, optionIndex) => {
+                const isSelected = selectedAnswer === option;
+
+                return (
+                  <button
+                    key={`${activeSubQuestion.id}-${optionIndex}`}
+                    type="button"
+                    onClick={() => !isSubmitted && onSelectPassageOption(activeSubQuestion.id, option)}
+                    disabled={isSubmitted}
+                    className={`rounded-[1.5rem] border px-5 py-5 text-left transition ${
+                      isSelected
+                        ? 'border-amber-400 bg-amber-50 shadow-[0_18px_36px_rgba(245,158,11,0.12)]'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    } ${isSubmitted ? 'cursor-not-allowed opacity-70' : ''}`}
+                  >
+                    <div className="flex items-start gap-4">
+                      <span
+                        className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-semibold ${
+                          isSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {String.fromCharCode(65 + optionIndex)}
+                      </span>
+                      <span className="pt-1 text-base text-slate-800">{option || `Option ${optionIndex + 1}`}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <QuestionNavigator
+        questions={questions}
+        activeQuestionIndex={activeQuestionIndex}
+        answers={answers}
+        onJumpToQuestion={onJumpToQuestion}
+      />
     </div>
   );
 }
 
-function CodingLayout({ question, answer, onChangeCode, onRunCode, isSubmitted }) {
+function CodingLayout({
+  question,
+  questions,
+  activeQuestionIndex,
+  answers,
+  onJumpToQuestion,
+  answer,
+  onChangeCode,
+  onChangeLanguage,
+  onChangeInput,
+  onLoadSampleInput,
+  onRunCode,
+  isSubmitted,
+}) {
+  const normalizedQuestion = normalizeCodingQuestion(question);
+  const selectedLanguage = answer?.language || normalizedQuestion.supportedLanguages[0];
+  const runStatus = answer?.status || 'idle';
+  const isRunning = runStatus === 'running';
+  const terminalBadgeClassName =
+    runStatus === 'success'
+      ? 'bg-emerald-500/20 text-emerald-200'
+      : runStatus === 'error' || runStatus === 'timeout'
+        ? 'bg-rose-500/20 text-rose-200'
+        : runStatus === 'running'
+          ? 'bg-amber-500/20 text-amber-100'
+          : 'bg-white/8 text-slate-300';
+
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
-        <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            Coding Prompt
-          </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-            {summarizeQuestion(question)}
-          </h2>
-          <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">
-            {question.problem || 'No coding prompt provided.'}
-          </div>
-        </div>
-
-        <div className="mt-5 rounded-[1.5rem] border border-slate-200 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                Test Cases
-              </p>
-              <p className="mt-1 text-sm text-slate-600">Sample inputs and expected outputs</p>
-            </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              {question.testCases?.length || 0} cases
-            </span>
-          </div>
-
-          <div className="grid gap-3 p-5">
-            {question.testCases?.map((testCase, index) => (
-              <div key={`${question.id}-case-${index}`} className="rounded-[1.25rem] border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">Case {index + 1}</p>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  Input
+    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
+        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+          <div className="rounded-[1.5rem] border border-slate-200 bg-[linear-gradient(135deg,#eff6ff,#f8fafc)] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-3xl">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
+                  Programming Question
                 </p>
-                <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-950 px-4 py-3 text-sm text-sky-100">
-                  {testCase.input || '(empty)'}
-                </pre>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  Expected
-                </p>
-                <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-950 px-4 py-3 text-sm text-emerald-100">
-                  {testCase.expected || '(not provided)'}
-                </pre>
+                <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
+                  {formatQuestionLabel(activeQuestionIndex)}. Solve the following problem
+                </h2>
+                <div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                  {question.problem || 'No coding prompt provided.'}
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-[#0b1220] text-slate-100 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-        <div className="flex items-center justify-between border-b border-white/8 bg-[#0f1728] px-5 py-4">
-          <div className="flex items-center gap-3">
-            <span className="rounded-full bg-white/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-sky-100">
-              editor.js
-            </span>
-            <span className="text-sm text-slate-400">LeetCode-style preview workspace</span>
-          </div>
-          <button
-            type="button"
-            onClick={onRunCode}
-            disabled={isSubmitted}
-            className={`rounded-full px-4 py-2 text-sm font-semibold text-slate-950 transition ${
-              isSubmitted ? 'bg-slate-400 cursor-not-allowed opacity-70' : 'bg-emerald-400 hover:bg-emerald-300'
-            }`}
-          >
-            Run Code
-          </button>
-        </div>
-
-        <div className="grid min-h-[720px] grid-rows-[1fr_220px]">
-          <textarea
-            value={answer?.code ?? question.code ?? ''}
-            onChange={(event) => !isSubmitted && onChangeCode(event.target.value)}
-            readOnly={isSubmitted}
-            className="min-h-[460px] w-full resize-none bg-[#0b1220] px-5 py-5 font-mono text-sm leading-7 text-slate-100 outline-none"
-            spellCheck={false}
-          />
-
-          <div className="border-t border-white/8 bg-[#050914] px-5 py-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Terminal Output
-              </p>
-              <span className="rounded-full bg-white/8 px-3 py-1 text-xs font-semibold text-slate-300">
-                preview
+              <span className="rounded-full border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-800">
+                {normalizedQuestion.supportedLanguages.length} languages
               </span>
             </div>
-            <pre className="h-[150px] overflow-auto rounded-[1.25rem] bg-black/35 px-4 py-4 font-mono text-sm leading-6 text-emerald-200">
-              {answer?.output || 'Run the code to populate terminal output.'}
-            </pre>
           </div>
-        </div>
-      </section>
+
+          <div className="mt-5 rounded-[1.5rem] border border-slate-200 bg-white">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Test Cases
+                </p>
+                <p className="mt-1 text-sm text-slate-600">Sample inputs and expected outputs</p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                {normalizedQuestion.testCases?.length || 0} cases
+              </span>
+            </div>
+
+            <div className="grid gap-3 p-5">
+              {normalizedQuestion.testCases?.map((testCase, index) => (
+                <div key={`${question.id}-case-${index}`} className="rounded-[1.25rem] border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-900">Case {index + 1}</p>
+                    <button
+                      type="button"
+                      onClick={() => onLoadSampleInput(testCase.input || '')}
+                      disabled={isSubmitted}
+                      className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-700 transition hover:border-slate-400 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Use Input
+                    </button>
+                  </div>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                    Input
+                  </p>
+                  <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-950 px-4 py-3 text-sm text-sky-100">
+                    {testCase.input || '(empty)'}
+                  </pre>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                    Expected
+                  </p>
+                  <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-950 px-4 py-3 text-sm text-emerald-100">
+                    {testCase.expected || '(not provided)'}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-[#0b1220] text-slate-100 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
+          <div className="flex items-center justify-between border-b border-white/8 bg-[#0f1728] px-5 py-4">
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedLanguage}
+                onChange={(e) => onChangeLanguage(e.target.value)}
+                disabled={isSubmitted || isRunning}
+                className="rounded-full bg-white/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-sky-100 outline-none"
+              >
+                {normalizedQuestion.supportedLanguages.map((language) => (
+                  <option key={language} value={language}>
+                    {getCodingLanguageLabel(language)}
+                  </option>
+                ))}
+              </select>
+              <span className="text-sm text-slate-400">Live runner with language-specific code buffers</span>
+            </div>
+            <button
+              type="button"
+              onClick={onRunCode}
+              disabled={isSubmitted || isRunning}
+              className={`rounded-full px-4 py-2 text-sm font-semibold text-slate-950 transition ${
+                isSubmitted || isRunning
+                  ? 'cursor-not-allowed bg-slate-400 opacity-70'
+                  : 'bg-emerald-400 hover:bg-emerald-300'
+              }`}
+            >
+              {isRunning ? 'Running…' : 'Run Code'}
+            </button>
+          </div>
+ 
+          <div className="grid min-h-[720px] grid-rows-[1fr_150px_220px]">
+            <textarea
+              value={
+                answer?.codeByLanguage?.[selectedLanguage]
+                  ?? getCodingStarterCode(normalizedQuestion, selectedLanguage)
+              }
+              onChange={(event) => !isSubmitted && onChangeCode(event.target.value)}
+              readOnly={isSubmitted}
+              className="min-h-[460px] w-full resize-none bg-[#0b1220] px-5 py-5 font-mono text-sm leading-7 text-slate-100 outline-none"
+              spellCheck={false}
+            />
+
+            <div className="border-t border-white/8 bg-[#08111e] px-5 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Standard Input
+                </p>
+                <span className="text-xs text-slate-400">Sent to stdin when the program runs</span>
+              </div>
+              <textarea
+                value={answer?.input ?? ''}
+                onChange={(event) => !isSubmitted && onChangeInput(event.target.value)}
+                readOnly={isSubmitted}
+                className="h-[90px] w-full resize-none rounded-[1.25rem] border border-white/8 bg-black/25 px-4 py-3 font-mono text-sm leading-6 text-slate-100 outline-none"
+                spellCheck={false}
+                placeholder="Provide custom input or load one of the sample cases."
+              />
+            </div>
+
+            <div className="border-t border-white/8 bg-[#050914] px-5 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Terminal Output
+                </p>
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${terminalBadgeClassName}`}>
+                  {getRunStatusLabel(runStatus)}
+                </span>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-3 text-xs text-slate-400">
+                <span>{getCodingLanguageLabel(selectedLanguage)}</span>
+                {Number.isFinite(answer?.durationMs) ? <span>{answer.durationMs}ms</span> : null}
+                {Number.isInteger(answer?.exitCode) ? <span>Exit {answer.exitCode}</span> : null}
+              </div>
+              <pre className="h-[150px] overflow-auto rounded-[1.25rem] bg-black/35 px-4 py-4 font-mono text-sm leading-6 text-emerald-200">
+                {answer?.output || 'Run the code to populate terminal output.'}
+              </pre>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <QuestionNavigator
+        questions={questions}
+        activeQuestionIndex={activeQuestionIndex}
+        answers={answers}
+        onJumpToQuestion={onJumpToQuestion}
+      />
     </div>
   );
 }
@@ -585,7 +828,6 @@ function ExamPage() {
   const [activeSectionIndex, setActiveSectionIndex] = useState(0);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [activePassageSubQuestionIndex, setActivePassageSubQuestionIndex] = useState(0);
-  const [isPassageSidebarOpen, setIsPassageSidebarOpen] = useState(false);
   const [answers, setAnswers] = useState({});
   const [isPreflightComplete, setIsPreflightComplete] = useState(false);
   const [preflightError, setPreflightError] = useState('');
@@ -607,10 +849,10 @@ function ExamPage() {
     connection: false,
     fullscreen: Boolean(document.fullscreenElement),
   });
-  const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
 
   useEffect(() => {
     if (exam?.mySubmission) {
+      setAnswers(exam.mySubmission.answers || {});
       setHasSubmitted(true);
       setSubmissionMessage('This exam has already been submitted.');
     }
@@ -652,6 +894,10 @@ function ExamPage() {
   const totalTimeLimit = useMemo(() => getTotalTimeLimit(sections), [sections]);
   const activeSection = sections[activeSectionIndex];
   const activeQuestion = activeSection?.questions?.[activeQuestionIndex];
+  const activeCodingAnswer =
+    activeQuestion?.type === 'coding'
+      ? getNormalizedCodingAnswer(activeQuestion, answers[activeQuestion.id])
+      : null;
   const isCreator = exam?.ownerId === user?._id;
   const faultThreshold = exam?.allowedFaults ?? 3;
   const faultsRemaining = Math.max(0, faultThreshold - faultCount);
@@ -667,7 +913,6 @@ function ExamPage() {
     }
 
     setActivePassageSubQuestionIndex(0);
-    setIsPassageSidebarOpen(false);
   }, [activeSection, activeQuestionIndex]);
 
   const changeSection = (nextSectionIndex) => {
@@ -699,44 +944,129 @@ function ExamPage() {
     }));
   };
 
-  const handleCodingChange = (code) => {
-    setAnswers((currentAnswers) => ({
-      ...currentAnswers,
-      [activeQuestion.id]: {
-        ...currentAnswers[activeQuestion.id],
-        code,
-        output: currentAnswers[activeQuestion.id]?.output || '',
-      },
-    }));
-  };
-
-  const handleRunCode = () => {
+  const updateCodingAnswerState = (updater) => {
     setAnswers((currentAnswers) => {
-      const currentAnswer = currentAnswers[activeQuestion.id] || {
-        code: activeQuestion.code || '',
-        output: '',
-      };
+      const currentAnswer = getNormalizedCodingAnswer(activeQuestion, currentAnswers[activeQuestion.id]);
 
       return {
         ...currentAnswers,
-        [activeQuestion.id]: {
-          ...currentAnswer,
-          output: buildCodingRunOutput(activeQuestion, currentAnswer),
-        },
+        [activeQuestion.id]: updater(currentAnswer),
       };
     });
   };
 
+  const handleCodingChange = (code) => {
+    updateCodingAnswerState((currentAnswer) => ({
+      ...currentAnswer,
+      codeByLanguage: {
+        ...currentAnswer.codeByLanguage,
+        [currentAnswer.language]: code,
+      },
+      code,
+    }));
+  };
+
+  const handleCodingLanguageChange = (language) => {
+    updateCodingAnswerState((currentAnswer) => ({
+      ...currentAnswer,
+      language,
+      code: currentAnswer.codeByLanguage[language] ?? getCodingStarterCode(activeQuestion, language),
+    }));
+  };
+
+  const handleCodingInputChange = (input) => {
+    updateCodingAnswerState((currentAnswer) => ({
+      ...currentAnswer,
+      input,
+    }));
+  };
+
+  const handleLoadCodingSampleInput = (input) => {
+    handleCodingInputChange(input);
+  };
+
+  const handleRunCode = async () => {
+    const question = normalizeCodingQuestion(activeQuestion);
+    const questionId = question.id;
+    const currentAnswer = getNormalizedCodingAnswer(question, answers[questionId]);
+    const language = currentAnswer.language;
+    const code = currentAnswer.codeByLanguage[language] ?? getCodingStarterCode(question, language);
+    const input = currentAnswer.input ?? '';
+
+    setAnswers((currentAnswers) => ({
+      ...currentAnswers,
+      [questionId]: {
+        ...getNormalizedCodingAnswer(question, currentAnswers[questionId]),
+        output: 'Running code...',
+        status: 'running',
+      },
+    }));
+
+    try {
+      const result = await runCode(code, language, input);
+
+      setAnswers((currentAnswers) => {
+        const latestAnswer = getNormalizedCodingAnswer(question, currentAnswers[questionId]);
+
+        return {
+          ...currentAnswers,
+          [questionId]: {
+            ...latestAnswer,
+            language,
+            codeByLanguage: {
+              ...latestAnswer.codeByLanguage,
+              [language]: code,
+            },
+            code,
+            input,
+            output: formatRunOutput(result),
+            status: result.status,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            timedOut: result.timedOut === true,
+            durationMs: Number.isFinite(result.durationMs) ? result.durationMs : null,
+            exitCode: Number.isInteger(result.exitCode) ? result.exitCode : null,
+            signal: typeof result.signal === 'string' ? result.signal : null,
+            outputLimitExceeded: result.outputLimitExceeded === true,
+          },
+        };
+      });
+    } catch (error) {
+      setAnswers((currentAnswers) => {
+        const latestAnswer = getNormalizedCodingAnswer(question, currentAnswers[questionId]);
+
+        return {
+          ...currentAnswers,
+          [questionId]: {
+            ...latestAnswer,
+            language,
+            codeByLanguage: {
+              ...latestAnswer.codeByLanguage,
+              [language]: code,
+            },
+            code,
+            input,
+            output: `Status: Error\nLanguage: ${getCodingLanguageLabel(language)}\n\n${error.message}`,
+            status: 'error',
+            stdout: '',
+            stderr: error.message,
+            timedOut: false,
+            durationMs: null,
+            exitCode: null,
+            signal: null,
+            outputLimitExceeded: false,
+          },
+        };
+      });
+    }
+  };
+
   const canGoPrevious = activeQuestionIndex > 0;
   const canGoNext = activeSection ? activeQuestionIndex < activeSection.questions.length - 1 : false;
-  const isLastQuestion = activeSection
-    ? activeQuestionIndex === activeSection.questions.length - 1
-    : false;
 
   useEffect(() => {
     const onFullscreenChange = () => {
       const fullscreenState = Boolean(document.fullscreenElement);
-      setIsFullscreen(fullscreenState);
       setPreflightReport((currentReport) => ({
         ...currentReport,
         fullscreen: fullscreenState,
@@ -775,7 +1105,6 @@ function ExamPage() {
       }));
 
       await requestFullScreen();
-      setIsFullscreen(Boolean(document.fullscreenElement));
       setPreflightReport((currentReport) => ({
         ...currentReport,
         fullscreen: true,
@@ -1199,11 +1528,12 @@ function ExamPage() {
           {activeQuestion.type === 'passage' ? (
             <PassageLayout
               question={activeQuestion}
+              questions={activeSection.questions}
+              activeQuestionIndex={activeQuestionIndex}
+              onJumpToQuestion={changeQuestion}
               answers={answers}
               activeSubQuestionIndex={activePassageSubQuestionIndex}
               setActiveSubQuestionIndex={setActivePassageSubQuestionIndex}
-              isSidebarOpen={isPassageSidebarOpen}
-              setIsSidebarOpen={setIsPassageSidebarOpen}
               onSelectPassageOption={handleSelectPassageOption}
               isSubmitted={hasSubmitted}
             />
@@ -1259,8 +1589,15 @@ function ExamPage() {
           {activeQuestion.type === 'coding' ? (
             <CodingLayout
               question={activeQuestion}
-              answer={answers[activeQuestion.id]}
+              questions={activeSection.questions}
+              activeQuestionIndex={activeQuestionIndex}
+              answers={answers}
+              onJumpToQuestion={changeQuestion}
+              answer={activeCodingAnswer}
               onChangeCode={handleCodingChange}
+              onChangeLanguage={handleCodingLanguageChange}
+              onChangeInput={handleCodingInputChange}
+              onLoadSampleInput={handleLoadCodingSampleInput}
               onRunCode={handleRunCode}
               isSubmitted={hasSubmitted}
             />
