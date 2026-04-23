@@ -95,7 +95,11 @@ const CreateExamPage = () => {
     setSections((currentSections) =>
       currentSections.map((section) =>
         section.id === sectionId
-          ? { ...section, questions: [...section.questions, buildQuestion(type)] }
+          ? {
+              ...section,
+              questionType: section.questionType || type,
+              questions: [...section.questions, buildQuestion(type)],
+            }
           : section,
       ),
     );
@@ -173,8 +177,16 @@ const CreateExamPage = () => {
         return `Enter a valid time limit for section ${index + 1}.`;
       }
 
+      if (!section.questionType) {
+        return `Select a question type for section ${index + 1}.`;
+      }
+
       if (!Array.isArray(section.questions) || section.questions.length === 0) {
-        return `Add at least one question to section ${index + 1}.`;
+        return `Add at least one ${section.questionType.toUpperCase()} question to section ${index + 1}.`;
+      }
+
+      if (section.questions.some((question) => question.type !== section.questionType)) {
+        return `All questions in section ${index + 1} must be ${section.questionType.toUpperCase()} type.`;
       }
     }
 
@@ -439,28 +451,43 @@ const CreateExamPage = () => {
                     </div>
                   </div>
 
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => addQuestion(section.id, 'mcq')}
-                      className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
-                    >
-                      Add MCQ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => addQuestion(section.id, 'coding')}
-                      className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700"
-                    >
-                      Add Coding Question
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => addQuestion(section.id, 'passage')}
-                      className="rounded-full bg-purple-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-700"
-                    >
-                      Add Passage
-                    </button>
+                  <div className="mt-5 flex flex-wrap gap-3 items-center">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-medium text-slate-700">Section question type</span>
+                      <select
+                        value={section.questionType}
+                        onChange={(event) =>
+                          !section.questions.length &&
+                          updateSection(section.id, { questionType: event.target.value })
+                        }
+                        disabled={section.questions.length > 0}
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 outline-none transition focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100"
+                      >
+                        <option value="">Choose a type</option>
+                        <option value="mcq">MCQ</option>
+                        <option value="coding">Coding</option>
+                        <option value="passage">Passage</option>
+                      </select>
+                      {section.questions.length > 0 ? (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Section type is locked after questions are added.
+                        </p>
+                      ) : null}
+                    </label>
+
+                    {section.questionType ? (
+                      <button
+                        type="button"
+                        onClick={() => addQuestion(section.id, section.questionType)}
+                        className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+                      >
+                        Add {section.questionType === 'mcq' ? 'MCQ' : section.questionType === 'coding' ? 'Coding' : 'Passage'} Question
+                      </button>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        Select a section type before adding questions. All questions in this section will share the same type.
+                      </p>
+                    )}
                   </div>
 
                   <div className="mt-5 space-y-4">

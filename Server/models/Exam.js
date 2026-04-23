@@ -42,6 +42,15 @@ const examSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.Mixed,
             default: {},
           },
+          faultsTriggered: {
+            type: Number,
+            default: 0,
+            min: 0,
+          },
+          autoSubmitted: {
+            type: Boolean,
+            default: false,
+          },
           submittedAt: {
             type: Date,
             default: () => new Date(),

@@ -35,16 +35,22 @@ export function buildSection(sectionNumber = 1) {
     id: createId('section'),
     title: `Section ${sectionNumber}`,
     timeLimitMinutes: 30,
+    questionType: '',
     questions: [],
   };
 }
 
 function normalizeSection(section = {}, index = 0) {
+  const questions = Array.isArray(section.questions) ? section.questions : [];
+  const questionType = section.questionType
+    || (questions.length > 0 && typeof questions[0].type === 'string' ? questions[0].type : '');
+
   return {
     id: section.id || createId('section'),
     title: section.title || `Section ${index + 1}`,
     timeLimitMinutes: Number.parseInt(section.timeLimitMinutes, 10) || 30,
-    questions: Array.isArray(section.questions) ? section.questions : [],
+    questionType,
+    questions,
   };
 }
 

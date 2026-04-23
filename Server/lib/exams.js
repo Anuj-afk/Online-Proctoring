@@ -7,11 +7,14 @@ function createSectionId(index) {
 function normalizeSection(section = {}, index = 0) {
   const questions = Array.isArray(section.questions) ? section.questions : [];
   const parsedTimeLimit = Number.parseInt(section.timeLimitMinutes, 10);
+  const questionType = section.questionType
+    || (questions.length > 0 && typeof questions[0].type === 'string' ? questions[0].type : '');
 
   return {
     id: section.id || createSectionId(index),
     title: typeof section.title === 'string' ? section.title.trim() : '',
     timeLimitMinutes: Number.isFinite(parsedTimeLimit) ? parsedTimeLimit : 0,
+    questionType,
     questions,
   };
 }
@@ -87,6 +90,8 @@ export function serializeSubmission(submission) {
   return {
     candidate,
     answers: submission.answers || {},
+    faultsTriggered: Number.isInteger(submission.faultsTriggered) ? submission.faultsTriggered : 0,
+    autoSubmitted: submission.autoSubmitted === true,
     submittedAt: submission.submittedAt ? new Date(submission.submittedAt).toISOString() : null,
   };
 }

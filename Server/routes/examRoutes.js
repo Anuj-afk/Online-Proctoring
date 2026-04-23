@@ -98,9 +98,15 @@ router.post('/:examId/submissions', async (req, res, next) => {
       throw createError('You have already submitted this exam.', 400);
     }
 
+    const faultsTriggered = Number.parseInt(req.body.faultsTriggered, 10);
+    const normalizedFaultsTriggered = Number.isInteger(faultsTriggered) && faultsTriggered >= 0 ? faultsTriggered : 0;
+    const autoSubmitted = req.body.autoSubmitted === true;
+
     exam.submissions.push({
       candidate: req.user.id,
       answers: req.body.answers || {},
+      faultsTriggered: normalizedFaultsTriggered,
+      autoSubmitted,
       submittedAt: new Date(),
     });
 
