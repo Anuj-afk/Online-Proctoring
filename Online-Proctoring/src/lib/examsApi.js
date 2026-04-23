@@ -10,3 +10,10 @@ export function createExam(exam) {
     body: JSON.stringify(exam),
   });
 }
+
+export function updateExam(examId, exam) {
+  return request(`/api/exams/${examId}`, {
+    method: 'PUT',
+    body: JSON.stringify(exam),
+  });
+}

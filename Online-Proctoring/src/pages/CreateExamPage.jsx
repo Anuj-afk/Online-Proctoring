@@ -5,46 +5,28 @@ import MCQQuestion from '../components/exam/MCQQuestion';
 import PassageQuestion from '../components/exam/PassageQuestion';
 import SavedExamList from '../components/exam/SavedExamList';
 import { useAuth } from '../context/AuthContext';
-import { createExam, fetchExams } from '../lib/examsApi';
-
-function buildQuestion(type) {
-  const newQuestion = { id: Date.now() + Math.random(), type };
-
-  if (type === 'mcq') {
-    return {
-      ...newQuestion,
-      question: '',
-      options: ['', '', '', ''],
-      correct: '',
-    };
-  }
-
-  if (type === 'coding') {
-    return {
-      ...newQuestion,
-      problem: '',
-      code: '',
-      testCases: [{ input: '', expected: '' }],
-    };
-  }
-
-  return {
-    ...newQuestion,
-    passage: '',
-    questions: [],
-  };
-}
+import { buildQuestion, buildSection, normalizeExamForEditor } from '../lib/examSections';
+import { createExam, fetchExams, updateExam } from '../lib/examsApi';
 
 const CreateExamPage = () => {
   const { logout, user } = useAuth();
   const [examTitle, setExamTitle] = useState('');
-  const [questions, setQuestions] = useState([]);
+  const [sections, setSections] = useState(() => [buildSection(1)]);
+  const [editingExamId, setEditingExamId] = useState(null);
   const [savedExams, setSavedExams] = useState([]);
   const [isLoadingExams, setIsLoadingExams] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [savedExamsError, setSavedExamsError] = useState('');
+
+  const resetBuilder = useCallback(() => {
+    setExamTitle('');
+    setSections([buildSection(1)]);
+    setEditingExamId(null);
+    setErrorMessage('');
+    setSuccessMessage('');
+  }, []);
 
   const loadExams = useCallback(async () => {
     setIsLoadingExams(true);
@@ -64,45 +46,139 @@ const CreateExamPage = () => {
     loadExams();
   }, [loadExams]);
 
-  const addQuestion = (type) => {
-    setQuestions((currentQuestions) => [...currentQuestions, buildQuestion(type)]);
+  const addSection = () => {
+    setSections((currentSections) => [...currentSections, buildSection(currentSections.length + 1)]);
   };
 
-  const updateQuestion = (id, updatedQuestion) => {
-    setQuestions((currentQuestions) =>
-      currentQuestions.map((question) => (question.id === id ? updatedQuestion : question)),
+  const updateSection = (sectionId, updates) => {
+    setSections((currentSections) =>
+      currentSections.map((section) =>
+        section.id === sectionId ? { ...section, ...updates } : section,
+      ),
     );
   };
 
-  const removeQuestion = (id) => {
-    setQuestions((currentQuestions) => currentQuestions.filter((question) => question.id !== id));
+  const removeSection = (sectionId) => {
+    setSections((currentSections) => {
+      if (currentSections.length === 1) {
+        return [buildSection(1)];
+      }
+
+      return currentSections.filter((section) => section.id !== sectionId);
+    });
+  };
+
+  const addQuestion = (sectionId, type) => {
+    setSections((currentSections) =>
+      currentSections.map((section) =>
+        section.id === sectionId
+          ? { ...section, questions: [...section.questions, buildQuestion(type)] }
+          : section,
+      ),
+    );
+  };
+
+  const updateQuestion = (sectionId, questionId, updatedQuestion) => {
+    setSections((currentSections) =>
+      currentSections.map((section) =>
+        section.id === sectionId
+          ? {
+              ...section,
+              questions: section.questions.map((question) =>
+                question.id === questionId ? updatedQuestion : question,
+              ),
+            }
+          : section,
+      ),
+    );
+  };
+
+  const removeQuestion = (sectionId, questionId) => {
+    setSections((currentSections) =>
+      currentSections.map((section) =>
+        section.id === sectionId
+          ? {
+              ...section,
+              questions: section.questions.filter((question) => question.id !== questionId),
+            }
+          : section,
+      ),
+    );
+  };
+
+  const editExamHandler = (exam) => {
+    const normalizedExam = normalizeExamForEditor(exam);
+    setEditingExamId(normalizedExam._id);
+    setExamTitle(normalizedExam.title);
+    setSections(normalizedExam.sections);
+    setErrorMessage('');
+    setSuccessMessage(`Editing "${normalizedExam.title}".`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const validateExam = () => {
+    if (!examTitle.trim()) {
+      return 'Please enter an exam title.';
+    }
+
+    if (sections.length === 0) {
+      return 'Add at least one section before saving the exam.';
+    }
+
+    for (const [index, section] of sections.entries()) {
+      if (!section.title.trim()) {
+        return `Enter a title for section ${index + 1}.`;
+      }
+
+      const timeLimitMinutes = Number.parseInt(section.timeLimitMinutes, 10);
+
+      if (!Number.isInteger(timeLimitMinutes) || timeLimitMinutes <= 0) {
+        return `Enter a valid time limit for section ${index + 1}.`;
+      }
+
+      if (!Array.isArray(section.questions) || section.questions.length === 0) {
+        return `Add at least one question to section ${index + 1}.`;
+      }
+    }
+
+    return '';
   };
 
   const saveExamHandler = async () => {
     setErrorMessage('');
     setSuccessMessage('');
 
-    if (!examTitle.trim()) {
-      setErrorMessage('Please enter an exam title.');
+    const validationMessage = validateExam();
+
+    if (validationMessage) {
+      setErrorMessage(validationMessage);
       return;
     }
 
-    if (questions.length === 0) {
-      setErrorMessage('Add at least one question before saving the exam.');
-      return;
-    }
+    const payload = {
+      title: examTitle.trim(),
+      sections: sections.map((section) => ({
+        ...section,
+        title: section.title.trim(),
+        timeLimitMinutes: Number.parseInt(section.timeLimitMinutes, 10),
+      })),
+    };
 
     setIsSaving(true);
 
     try {
-      await createExam({
-        title: examTitle.trim(),
-        questions,
-      });
+      const savedExam = editingExamId
+        ? await updateExam(editingExamId, payload)
+        : await createExam(payload);
 
-      setSuccessMessage('Exam saved successfully.');
-      setExamTitle('');
-      setQuestions([]);
+      const normalizedExam = normalizeExamForEditor(savedExam);
+
+      setEditingExamId(normalizedExam._id);
+      setExamTitle(normalizedExam.title);
+      setSections(normalizedExam.sections);
+      setSuccessMessage(
+        editingExamId ? 'Exam updated successfully.' : 'Exam saved successfully.',
+      );
       await loadExams();
     } catch (error) {
       setErrorMessage(error.message);
@@ -146,88 +222,177 @@ const CreateExamPage = () => {
             Exam Builder
           </p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight text-slate-900">
-            Create and store exams
+            {editingExamId ? 'Edit your exam' : 'Create and store exams'}
           </h1>
           <p className="mt-3 max-w-2xl text-slate-600">
-            Save exams to MongoDB from the form below. The list on the right only shows tests
-            created by your account.
+            Build exams section by section, assign a time limit to each section, and reopen saved
+            exams for editing whenever needed.
           </p>
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="mb-6">
-              <label className="mb-2 block text-sm font-medium text-slate-700">Exam Title</label>
-              <input
-                type="text"
-                value={examTitle}
-                onChange={(event) => setExamTitle(event.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
-                placeholder="Enter exam title"
-              />
-            </div>
+            <div className="mb-6 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex-1">
+                <label className="mb-2 block text-sm font-medium text-slate-700">Exam Title</label>
+                <input
+                  type="text"
+                  value={examTitle}
+                  onChange={(event) => setExamTitle(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
+                  placeholder="Enter exam title"
+                />
+              </div>
 
-            <div className="mb-6">
-              <h2 className="mb-4 text-xl font-semibold text-slate-900">Add Questions</h2>
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => addQuestion('mcq')}
-                  className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+                  onClick={addSection}
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-blue-600 px-5 text-sm font-semibold text-white transition hover:bg-blue-700"
                 >
-                  Add MCQ
+                  Add Section
                 </button>
                 <button
                   type="button"
-                  onClick={() => addQuestion('coding')}
-                  className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700"
+                  onClick={resetBuilder}
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-white"
                 >
-                  Add Coding Question
-                </button>
-                <button
-                  type="button"
-                  onClick={() => addQuestion('passage')}
-                  className="rounded-full bg-purple-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-700"
-                >
-                  Add Passage
+                  {editingExamId ? 'Create New Exam' : 'Reset Builder'}
                 </button>
               </div>
             </div>
 
-            <div className="space-y-4">
-              {questions.map((question) => (
-                <div key={question.id} className="rounded-3xl border border-slate-200 p-5">
-                  {question.type === 'mcq' ? (
-                    <MCQQuestion
-                      question={question}
-                      onUpdate={(updatedQuestion) => updateQuestion(question.id, updatedQuestion)}
-                      onRemove={() => removeQuestion(question.id)}
-                    />
-                  ) : null}
+            <div className="space-y-6">
+              {sections.map((section, sectionIndex) => (
+                <section
+                  key={section.id}
+                  className="rounded-[2rem] border border-slate-200 bg-slate-50/70 p-5"
+                >
+                  <div className="flex flex-col gap-4 rounded-[1.75rem] border border-slate-200 bg-white p-5 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="grid flex-1 gap-4 md:grid-cols-[1fr_220px]">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-slate-700">
+                          Section Title
+                        </span>
+                        <input
+                          type="text"
+                          value={section.title}
+                          onChange={(event) =>
+                            updateSection(section.id, { title: event.target.value })
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
+                          placeholder={`Section ${sectionIndex + 1}`}
+                        />
+                      </label>
 
-                  {question.type === 'coding' ? (
-                    <CodingQuestion
-                      question={question}
-                      onUpdate={(updatedQuestion) => updateQuestion(question.id, updatedQuestion)}
-                      onRemove={() => removeQuestion(question.id)}
-                    />
-                  ) : null}
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-slate-700">
+                          Time Limit (minutes)
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={section.timeLimitMinutes}
+                          onChange={(event) =>
+                            updateSection(section.id, { timeLimitMinutes: event.target.value })
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-slate-500"
+                          placeholder="30"
+                        />
+                      </label>
+                    </div>
 
-                  {question.type === 'passage' ? (
-                    <PassageQuestion
-                      question={question}
-                      onUpdate={(updatedQuestion) => updateQuestion(question.id, updatedQuestion)}
-                      onRemove={() => removeQuestion(question.id)}
-                    />
-                  ) : null}
-                </div>
+                    <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          Section {sectionIndex + 1}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {section.questions.length} questions
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeSection(section.id)}
+                        disabled={sections.length === 1}
+                        className="inline-flex min-h-11 items-center justify-center rounded-full border border-red-200 px-4 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Remove Section
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => addQuestion(section.id, 'mcq')}
+                      className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+                    >
+                      Add MCQ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => addQuestion(section.id, 'coding')}
+                      className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700"
+                    >
+                      Add Coding Question
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => addQuestion(section.id, 'passage')}
+                      className="rounded-full bg-purple-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-700"
+                    >
+                      Add Passage
+                    </button>
+                  </div>
+
+                  <div className="mt-5 space-y-4">
+                    {section.questions.map((question) => (
+                      <div
+                        key={question.id}
+                        className="rounded-3xl border border-slate-200 bg-white p-5"
+                      >
+                        {question.type === 'mcq' ? (
+                          <MCQQuestion
+                            question={question}
+                            onUpdate={(updatedQuestion) =>
+                              updateQuestion(section.id, question.id, updatedQuestion)
+                            }
+                            onRemove={() => removeQuestion(section.id, question.id)}
+                          />
+                        ) : null}
+
+                        {question.type === 'coding' ? (
+                          <CodingQuestion
+                            question={question}
+                            onUpdate={(updatedQuestion) =>
+                              updateQuestion(section.id, question.id, updatedQuestion)
+                            }
+                            onRemove={() => removeQuestion(section.id, question.id)}
+                          />
+                        ) : null}
+
+                        {question.type === 'passage' ? (
+                          <PassageQuestion
+                            question={question}
+                            onUpdate={(updatedQuestion) =>
+                              updateQuestion(section.id, question.id, updatedQuestion)
+                            }
+                            onRemove={() => removeQuestion(section.id, question.id)}
+                          />
+                        ) : null}
+                      </div>
+                    ))}
+
+                    {section.questions.length === 0 ? (
+                      <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-500">
+                        No questions in this section yet.
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
               ))}
-
-              {questions.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
-                  No questions added yet.
-                </div>
-              ) : null}
             </div>
 
             {errorMessage ? (
@@ -248,7 +413,13 @@ const CreateExamPage = () => {
               disabled={isSaving}
               className="mt-6 inline-flex min-h-12 items-center justify-center rounded-full bg-slate-900 px-6 font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSaving ? 'Saving...' : 'Save Exam'}
+              {isSaving
+                ? editingExamId
+                  ? 'Updating...'
+                  : 'Saving...'
+                : editingExamId
+                  ? 'Update Exam'
+                  : 'Save Exam'}
             </button>
           </section>
 
@@ -256,7 +427,9 @@ const CreateExamPage = () => {
             exams={savedExams}
             isLoading={isLoadingExams}
             errorMessage={savedExamsError}
+            onEdit={editExamHandler}
             onRefresh={loadExams}
+            activeExamId={editingExamId}
           />
         </div>
       </div>

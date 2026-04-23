@@ -13,6 +13,10 @@ const examSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    sections: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
     questions: {
       type: [mongoose.Schema.Types.Mixed],
       default: [],

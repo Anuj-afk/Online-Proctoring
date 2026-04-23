@@ -1,3 +1,11 @@
+import {
+  countQuestionTypes,
+  flattenQuestionsFromSections,
+  getExamSections,
+  getTotalTimeLimit,
+  summarizeQuestion,
+} from '../../lib/examSections';
+
 function formatDate(value) {
   return new Date(value).toLocaleString('en-IN', {
     dateStyle: 'medium',
@@ -5,24 +13,14 @@ function formatDate(value) {
   });
 }
 
-function countQuestionTypes(questions) {
-  return questions.reduce(
-    (counts, question) => {
-      counts[question.type] = (counts[question.type] || 0) + 1;
-      return counts;
-    },
-    { mcq: 0, coding: 0, passage: 0 },
-  );
-}
-
-function SavedExamList({ exams, isLoading, errorMessage, onRefresh }) {
+function SavedExamList({ exams, isLoading, errorMessage, onRefresh, onEdit, activeExamId }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Saved Exams</h2>
           <p className="text-sm text-slate-500">
-            These are loaded from MongoDB for your signed-in account only.
+            Open an existing exam to edit its sections, time limits, and questions.
           </p>
         </div>
         <button
@@ -50,48 +48,115 @@ function SavedExamList({ exams, isLoading, errorMessage, onRefresh }) {
 
       <div className="space-y-4">
         {exams.map((exam) => {
-          const counts = countQuestionTypes(exam.questions);
+          const sections = getExamSections(exam);
+          const questions = flattenQuestionsFromSections(sections);
+          const counts = countQuestionTypes(questions);
+          const totalTimeLimit = getTotalTimeLimit(sections);
+          const isActive = activeExamId === exam._id;
 
           return (
             <article
               key={exam._id}
-              className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5"
+              className={`rounded-3xl border p-5 transition ${
+                isActive
+                  ? 'border-slate-900 bg-slate-900 text-white shadow-[0_20px_40px_rgba(15,23,42,0.18)]'
+                  : 'border-slate-200 bg-slate-50/80'
+              }`}
             >
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{exam.title}</h3>
-                  <p className="text-sm text-slate-500">
-                    {exam.questions.length} questions • saved {formatDate(exam.createdAt)}
+                  <h3 className={`text-lg font-semibold ${isActive ? 'text-white' : 'text-slate-900'}`}>
+                    {exam.title}
+                  </h3>
+                  <p className={`text-sm ${isActive ? 'text-white/70' : 'text-slate-500'}`}>
+                    {sections.length} sections • {questions.length} questions • {totalTimeLimit}{' '}
+                    minutes • saved {formatDate(exam.updatedAt || exam.createdAt)}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs font-medium">
-                  <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-700">
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-medium ${
+                      isActive ? 'bg-white/10 text-white' : 'bg-blue-100 text-blue-700'
+                    }`}
+                  >
                     MCQ: {counts.mcq}
                   </span>
-                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-medium ${
+                      isActive ? 'bg-white/10 text-white' : 'bg-emerald-100 text-emerald-700'
+                    }`}
+                  >
                     Coding: {counts.coding}
                   </span>
-                  <span className="rounded-full bg-purple-100 px-3 py-1 text-purple-700">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-medium ${
+                      isActive ? 'bg-white/10 text-white' : 'bg-purple-100 text-purple-700'
+                    }`}
+                  >
                     Passage: {counts.passage}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => onEdit(exam)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? 'bg-white text-slate-900 hover:bg-white/90'
+                        : 'bg-slate-900 text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    {isActive ? 'Editing' : 'Edit'}
+                  </button>
                 </div>
               </div>
 
-              <div className="mt-4 space-y-2">
-                {exam.questions.map((question, index) => (
+              <div className="mt-4 space-y-3">
+                {sections.map((section, sectionIndex) => (
                   <div
-                    key={question.id ?? `${exam._id}-${index}`}
-                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                    key={section.id ?? `${exam._id}-section-${sectionIndex}`}
+                    className={`rounded-2xl border px-4 py-4 ${
+                      isActive ? 'border-white/10 bg-white/6' : 'border-slate-200 bg-white'
+                    }`}
                   >
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                      {question.type} question
-                    </p>
-                    <p className="mt-1 text-sm text-slate-700">
-                      {question.question ||
-                        question.problem ||
-                        question.passage?.slice(0, 140) ||
-                        'Question content saved.'}
-                    </p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p
+                          className={`text-xs font-semibold uppercase tracking-[0.14em] ${
+                            isActive ? 'text-white/55' : 'text-slate-400'
+                          }`}
+                        >
+                          Section {sectionIndex + 1}
+                        </p>
+                        <h4 className={`mt-1 font-semibold ${isActive ? 'text-white' : 'text-slate-900'}`}>
+                          {section.title}
+                        </h4>
+                      </div>
+                      <p className={`text-sm ${isActive ? 'text-white/75' : 'text-slate-500'}`}>
+                        {section.timeLimitMinutes} min • {section.questions.length} questions
+                      </p>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {section.questions.map((question, questionIndex) => (
+                        <div
+                          key={question.id ?? `${section.id}-${questionIndex}`}
+                          className={`rounded-2xl border px-4 py-3 ${
+                            isActive ? 'border-white/10 bg-slate-950/20' : 'border-slate-200 bg-slate-50'
+                          }`}
+                        >
+                          <p
+                            className={`text-xs font-semibold uppercase tracking-[0.12em] ${
+                              isActive ? 'text-white/50' : 'text-slate-400'
+                            }`}
+                          >
+                            {question.type} question
+                          </p>
+                          <p className={`mt-1 text-sm ${isActive ? 'text-white/82' : 'text-slate-700'}`}>
+                            {summarizeQuestion(question)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
